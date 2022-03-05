@@ -21,21 +21,16 @@ public class Publisher {
 //            System.exit(-1);
 //        }
 
-        Publisher publisher = new Publisher("11");
+        Publisher publisher = new Publisher("1");
 
         Scanner scanner = new Scanner(System.in);
-        Socket socket = new Socket("127.0.0.1", publisher.port);
-        OutputStream os = new DataOutputStream(socket.getOutputStream());
-        ObjectOutputStream oos = new ObjectOutputStream(os);
 
         while(true){
             String[] msgContent = scanner.nextLine().split(" ");
-            publisher.publish(new Message(msgContent[0],msgContent[1]) , oos);
+            Socket socket = new Socket("127.0.0.1", publisher.port);
+            Thread sendMessageHandler = new Thread(new SendMessageHandler(socket,new Message(msgContent[0],msgContent[1])));
+            sendMessageHandler.start();
         }
-    }
-
-    public void publish(Message message, ObjectOutputStream oos) throws IOException {
-        oos.writeObject(message);
     }
 }
 
