@@ -8,6 +8,9 @@ public class Broker {
     String brokerName;
     int port;
 
+    //TimeDifference
+    Map<String , Long> mapTimeDifference = new HashMap<>();
+
     Map<String, Set<String>> subscribersTopicMap = new HashMap<String, Set<String>>();
     Map<String, String> subscribers = new HashMap<String, String>();
 
@@ -197,22 +200,42 @@ class RequestHandler extends Thread{
     @Override
     public void run() {
         try {
-            InputStream is = socket.getInputStream();
-            ObjectInputStream ois=new ObjectInputStream(is);
-            Message msg = (Message) ois.readObject();
-            broker.addMessageToQueue(msg.getTopic(),msg);
-            System.out.println("receive message from publisher：" + msg.toString());
+            while(true){
+                Long receiveTime = System.nanoTime();
+                InputStream is = socket.getInputStream();
+                ObjectInputStream ois=new ObjectInputStream(is);
+                Object obj = (Object)ois.readObject();
+                if(obj instanceof  TimePub){
+                    TimePub timePub = (TimePub) obj;
+                    if(timePub.count == 1){
+                        System.out.println("收到第一条消息");
+                        TimePub timePub1 = new TimePub(timePub.topic, 2, System.nanoTime() + receiveTime -timePub.timestamp);
+                        System.out.println(timePub1.toString());
+                        new Thread(new SendMessageHandler(socket, timePub1)).start();
+                    }else if(timePub.count == 3){
+                        System.out.println("..........");
+                        System.out.println("TimeDifference: " + timePub.getTopic() +" "+ timePub.getTimestamp()/2);
+                        broker.mapTimeDifference.put(timePub.getTopic(), timePub.getTimestamp()/2);
+                    }
+
+                }else if(obj instanceof  Message){
+                    System.out.println("............");
+                    Message msg = (Message) obj;
+                    broker.addMessageToQueue(msg.getTopic(),msg);
+                    System.out.println("receive message from publisher：" + msg.toString());
+                }
+            }
         } catch (IOException | ClassNotFoundException e) {
             e.printStackTrace();
         }
     }
 }
 
-class SendMessageHandler extends Thread{
+class SendMessageHandler<T> extends Thread{
     Socket socket;
-    Message msg;
+    T msg;
 
-    public SendMessageHandler(Socket s, Message m){
+    public SendMessageHandler(Socket s, T m){
         this.socket = s;
         this.msg = m;
     }
@@ -223,8 +246,6 @@ class SendMessageHandler extends Thread{
             OutputStream os = new DataOutputStream(socket.getOutputStream());
             ObjectOutputStream oos = new ObjectOutputStream(os);
             oos.writeObject(msg);
-            oos.close();
-            socket.close();
         } catch (IOException e) {
             e.printStackTrace();
         }

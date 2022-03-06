@@ -2,14 +2,14 @@ package main;
 
 import java.io.Serializable;
 
-public class Message implements Serializable {
-    private String topic;
-    private String payload;
-    private Long timestamp;
+public class TimePub implements Serializable {
+    String topic;
+    int count;
+    Long timestamp;
 
-    public Message(String topic, String payload, long timestamp) {
+    public TimePub(String topic, int count, Long timestamp) {
         this.topic = topic;
-        this.payload = payload;
+        this.count = count;
         this.timestamp = timestamp;
     }
 
@@ -21,12 +21,12 @@ public class Message implements Serializable {
         this.topic = topic;
     }
 
-    public String getPayload() {
-        return payload;
+    public int getCount() {
+        return count;
     }
 
-    public void setPayload(String payload) {
-        this.payload = payload;
+    public void setCount(int count) {
+        this.count = count;
     }
 
     public Long getTimestamp() {
@@ -39,9 +39,9 @@ public class Message implements Serializable {
 
     @Override
     public String toString() {
-        return "Message{" +
+        return "TimPub{" +
                 "topic='" + topic + '\'' +
-                ", payload='" + payload + '\'' +
+                ", count=" + count +
                 ", timestamp=" + timestamp +
                 '}';
     }
