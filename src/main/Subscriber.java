@@ -32,6 +32,7 @@ public class Subscriber implements Serializable {
         Scanner scanner = new Scanner(System.in);
         String name = scanner.nextLine();
         int port = scanner.nextInt();
+        List<String> topicSelected = new ArrayList<>();
 
 
         String ip = InetAddress.getLocalHost().getHostAddress();
@@ -56,87 +57,47 @@ public class Subscriber implements Serializable {
         }
         try{
             socket = new Socket(serverIP, serverPort);
-            new Thread(new WriteHandlerThread(socket)).start();
-            new Thread(new ReadHandlerThread(socket)).start();
+            System.out.println("输入" + name + "想要关注的topic: ");
+            Scanner sc = new Scanner(System.in);
+            String[] topicList = sc.nextLine().split(" ");
+            for(String topic : topicList){
+                topicSelected.add(topic);
+            }
+            new Thread(new SendTopic<>(socket, new TopicSub(name, topicSelected))).start();
+            new Thread(new MessageReceiver(socket)).start();
         }catch(Exception e){
             e.printStackTrace();
         }
     }
 }
-class ReadHandlerThread implements  Runnable{
-    private Socket socket;
-    public  ReadHandlerThread(Socket socket){
-        this.socket = socket;
-    }
-    @Override
-    public void run() {
-        DataInputStream dis = null;
-        try{
-            while(true){
-                dis = new DataInputStream(socket.getInputStream());
-                String receive = dis.readUTF();
-                System.out.println("broker发过来的是： " + receive);
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }finally{
-            try{
-                if(dis != null){
-                    dis.close();
-                }
-                if(socket != null){
-                    socket = null;
-                }
-            }catch(IOException e){
-                e.printStackTrace();
-            }
-        }
 
-    }
-}
-class WriteHandlerThread implements  Runnable{
-    private Socket client;
-    public  WriteHandlerThread(Socket client){
-        this.client = client;
+class SendTopic<T> extends Thread{
+    Socket socket;
+    TopicSub topicSub;
+
+    public SendTopic(Socket s, TopicSub topicSub){
+        this.socket = s;
+        this.topicSub = topicSub;
     }
 
     @Override
     public void run() {
-        DataOutputStream dos = null;
-        BufferedReader br = null;
-        try{
-            while(true){
-                dos = new DataOutputStream(client.getOutputStream());
-                System.out.println("请输入：\t");
-                br = new BufferedReader(new InputStreamReader(System.in));
-                String send = br.readLine();
-                dos.writeUTF(send);
-            }
+        try {
+            OutputStream os = new DataOutputStream(socket.getOutputStream());
+            ObjectOutputStream oos = new ObjectOutputStream(os);
+            oos.writeObject(topicSub);
         } catch (IOException e) {
             e.printStackTrace();
-        } finally{
-            try{
-                if(dos != null){
-                    dos.close();
-                }
-                if(br != null){
-                    br.close();
-                }
-                if(client != null){
-                    client = null;
-                }
-            }catch(Exception e){
-                e.printStackTrace();
-            }
         }
     }
-
 }
 
-class messageReceiver extends Thread{
+
+
+class MessageReceiver extends Thread{
     private Socket socket;
 
-    public messageReceiver(Socket s){
+    public MessageReceiver(Socket s){
         this.socket = s;
     }
 
@@ -145,7 +106,13 @@ class messageReceiver extends Thread{
         try {
             InputStream is = socket.getInputStream();
             ObjectInputStream ois=new ObjectInputStream(is);
-            System.out.println("收到的消息：" + (Message) ois.readObject());
+            Object obj = (Object)ois.readObject();
+            if(obj instanceof  Message){
+                System.out.println("收到的消息：" + (Message) ois.readObject());
+            }else if(obj instanceof  TopicSub){
+                TopicSub topicSub = (TopicSub)obj;
+                System.out.println(topicSub.subscriberName + "可以接受的topic是" + topicSub.topicSelected);
+            }
         } catch (IOException | ClassNotFoundException e) {
             e.printStackTrace();
         }

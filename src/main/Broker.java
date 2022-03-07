@@ -8,6 +8,7 @@ public class Broker {
     String brokerName;
     int port;
 
+
     //TimeDifference
     Map<String , Long> mapTimeDifference = new HashMap<>();
 
@@ -174,10 +175,13 @@ public class Broker {
         ServerSocket serverSocket = new ServerSocket(broker.port);
         Socket socket = null;
 
+
         while(true) {
             socket = serverSocket.accept();
             Thread requestHandler=new Thread(new RequestHandler(socket,broker));
             requestHandler.start();
+
+            //Send TopicSelected
 
             while(Thread.activeCount()>2){
                 Thread.yield();
@@ -217,12 +221,21 @@ class RequestHandler extends Thread{
                         System.out.println("TimeDifference: " + timePub.getTopic() +" "+ timePub.getTimestamp()/2);
                         broker.mapTimeDifference.put(timePub.getTopic(), timePub.getTimestamp()/2);
                     }
-
                 }else if(obj instanceof  Message){
                     System.out.println("............");
                     Message msg = (Message) obj;
                     broker.addMessageToQueue(msg.getTopic(),msg);
                     System.out.println("receive message from publisher：" + msg.toString());
+                }else if(obj instanceof  TopicSub){
+                    TopicSub topicSub = (TopicSub) obj;
+                    System.out.println(topicSub);
+                    for(String topic : topicSub.topicSelected){
+                        if(!broker.subscribersTopicMap.containsKey(topic)){
+                            broker.subscribersTopicMap.put(topic, new HashSet<>());
+                        }
+                        broker.subscribersTopicMap.get(topic).add(topicSub.subscriberName);
+                    }
+                    System.out.println("收到来自" + topicSub.subscriberName + "的连接选择的topic是" + topicSub.topicSelected);
                 }
             }
         } catch (IOException | ClassNotFoundException e) {
@@ -251,4 +264,5 @@ class SendMessageHandler<T> extends Thread{
         }
     }
 }
+
 
