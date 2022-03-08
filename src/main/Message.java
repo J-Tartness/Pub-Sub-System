@@ -7,6 +7,11 @@ public class Message implements Serializable {
     private String payload;
     private Long timestamp;
 
+    public Message(String topic, String payload) {
+        this.topic = topic;
+        this.payload = payload;
+    }
+
     public Message(String topic, String payload, long timestamp) {
         this.topic = topic;
         this.payload = payload;

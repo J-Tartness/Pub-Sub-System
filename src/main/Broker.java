@@ -8,29 +8,26 @@ public class Broker {
     String brokerName;
     int port;
 
-
     //TimeDifference
     Map<String , Long> mapTimeDifference = new HashMap<>();
 
     Map<String, Set<String>> subscribersTopicMap = new HashMap<String, Set<String>>();
     Map<String, String> subscribers = new HashMap<String, String>();
+    Map<String, Socket> onlineSubscribers = new HashMap<String, Socket>();
 
     Map<String, Integer> indexOfTopicPriorityQueue = new HashMap<String,Integer>();
     List<PriorityQueue<Message>> topicPriorityQueues = new ArrayList<PriorityQueue<Message>>();
-
-    File topicAndSubscriberFile;
-    File subscriberInfoFile;
 
     public Broker(String brokerName) throws IOException {
         this.brokerName = brokerName;
         this.port = 8088;
 
-        subscriberInfoFile = new File("subscriberInfo.txt");
+        File subscriberInfoFile = new File("subscriberInfo.txt");
         if (!subscriberInfoFile.exists()) {
             subscriberInfoFile.createNewFile();
         }
 
-        topicAndSubscriberFile = new File("topicAndSubscriber.txt");
+        File topicAndSubscriberFile = new File("topicAndSubscriber.txt");
         if (!topicAndSubscriberFile.exists()) {
             topicAndSubscriberFile.createNewFile();
         }
@@ -39,8 +36,8 @@ public class Broker {
     }
 
     public void init() throws IOException {
-        BufferedReader brOfTopicAndSubscriber = new BufferedReader(new FileReader(topicAndSubscriberFile));
-        BufferedReader brOfSubscriberInfo = new BufferedReader(new FileReader(subscriberInfoFile));
+        BufferedReader brOfTopicAndSubscriber = new BufferedReader(new FileReader("topicAndSubscriber.txt"));
+        BufferedReader brOfSubscriberInfo = new BufferedReader(new FileReader("subscriberInfo.txt"));
 
         String line = null;
         while((line = brOfTopicAndSubscriber.readLine())!=null){
@@ -66,77 +63,64 @@ public class Broker {
 
         int index = 0;
         for(String topic : subscribersTopicMap.keySet()){
-            topicPriorityQueues.add(new PriorityQueue<Message>());
+            topicPriorityQueues.add(new PriorityQueue<Message>((v1,v2)-> (int) (v1.getTimestamp()-v2.getTimestamp())));
             indexOfTopicPriorityQueue.put(topic,index);
             index++;
         }
     }
 
-    public void addSubscriber(String topic, String[] subscriberInfo) throws IOException {
-        String subscriberName = subscriberInfo[0];
-        String ip = subscriberInfo[1];
-        String port = subscriberInfo[2];
+    public void addSubscriber(String topic, String name) throws IOException {
+        if(!subscribersTopicMap.containsKey(topic)){
+            subscribersTopicMap.put(topic, new HashSet<>());
+        }
 
         //modify relationship Table of Topic and Subscriber
         Set<String> set = subscribersTopicMap.get(topic);
-        set.add(subscriberName);
+        set.add(name);
         subscribersTopicMap.put(topic,set);
 
-        BufferedReader brOfTopicAndSubscriber = new BufferedReader(new FileReader(subscriberInfoFile));
-        BufferedWriter outputOftopicAndSub = new BufferedWriter(new FileWriter(topicAndSubscriberFile));
+        BufferedReader brOfTopicAndSubscriber = new BufferedReader(new FileReader("topicAndSubscriber.txt"));
+        ArrayList<String> list = new ArrayList<>();
 
         String line = null;
         while((line = brOfTopicAndSubscriber.readLine())!=null){
             String[] strs = line.split(" ");
             if(strs[0].equals(topic)){
-                line = line+" "+subscriberName;
+                line = line+" "+name;
             }
-            outputOftopicAndSub.write(line);
+            list.add(line);
         }
+
+        BufferedWriter outputOftopicAndSub = new BufferedWriter(new FileWriter("topicAndSubscriber.txt"));
+        for(String s:list){
+            outputOftopicAndSub.write(s+"\n");
+        }
+
         brOfTopicAndSubscriber.close();
         outputOftopicAndSub.close();
-
-        //modify subscribersInfo Table
-        if(subscribers.containsKey(subscriberName)){
-            BufferedWriter outputOfSubscriberInfo = new BufferedWriter(new FileWriter(subscriberInfoFile));
-            BufferedReader brOfSubscriberInfo = new BufferedReader(new FileReader(subscriberInfoFile));
-
-            while((line = brOfSubscriberInfo.readLine())!=null){
-                String[] strs = line.split(" ");
-                if(strs[0].equals(subscriberName)){
-                    line = subscriberName+" "+ip+" "+port+"\n";
-                }
-                outputOfSubscriberInfo.write(line);
-            }
-            outputOfSubscriberInfo.close();
-            brOfSubscriberInfo.close();
-        }
-        else{
-            BufferedWriter outputOfSubscriberInfo = new BufferedWriter(new FileWriter(subscriberInfoFile,true));
-            outputOfSubscriberInfo.write(subscriberName+" "+ip+" "+port+"\n");
-            outputOfSubscriberInfo.close();
-        }
-        subscribers.put(subscriberName, ip+":"+port);
     }
 
-    public void removeSubscriber(String topic, String[] subscriberInfo) throws IOException {
-        String subscriberName = subscriberInfo[0];
-
+    public void removeSubscriber(String topic, String name) throws IOException {
         Set<String> set = subscribersTopicMap.get(topic);
-        set.remove(subscriberName);
+        set.remove(name);
         subscribersTopicMap.put(topic,set);
 
-        BufferedReader brOfTopicAndSubscriber = new BufferedReader(new FileReader(subscriberInfoFile));
-        BufferedWriter outputOftopicAndSub = new BufferedWriter(new FileWriter(topicAndSubscriberFile));
+        BufferedReader brOfTopicAndSubscriber = new BufferedReader(new FileReader("topicAndSubscriber.txt"));
+        ArrayList<String> list = new ArrayList<>();
 
         String line = null;
         while((line = brOfTopicAndSubscriber.readLine())!=null){
             String[] strs = line.split(" ");
             if(strs[0].equals(topic)){
-                int index = line.indexOf(subscriberName);
-                line = line.substring(0,index-1)+line.substring(index+subscriberName.length());
+                int index = line.indexOf(name);
+                line = line.substring(0,index-1)+line.substring(index+name.length());
             }
-            outputOftopicAndSub.write(line);
+            list.add(line);
+        }
+
+        BufferedWriter outputOftopicAndSub = new BufferedWriter(new FileWriter("topicAndSubscriber.txt"));
+        for(String s:list){
+            outputOftopicAndSub.write(s+"\n");
         }
         brOfTopicAndSubscriber.close();
         outputOftopicAndSub.close();
@@ -159,11 +143,16 @@ public class Broker {
         Message message = topicPriorityQueues.get(indexOfTopicPriorityQueue.get(topic)).poll();
 
         for(String subscriberName:set){
-            String[] strs = subscribers.get(subscriberName).split(" ");
-            String ip = strs[0];
-            int p = Integer.parseInt(strs[1]);
-            Socket s = new Socket(ip, p);
-
+//            String[] strs = subscribers.get(subscriberName).split(" ");
+//            String ip = strs[0];
+//            int p = Integer.parseInt(strs[1]);
+//            Socket s = new Socket(ip, p);
+            Socket s = onlineSubscribers.getOrDefault(subscriberName, null);
+            if(s==null){
+                continue;
+            }
+            System.out.println("Send Message to:"+subscriberName);
+            System.out.println(message.toString());
             Thread sendMessageHandler = new Thread(new SendMessageHandler(s,message));
             sendMessageHandler.start();
         }
@@ -175,19 +164,10 @@ public class Broker {
         ServerSocket serverSocket = new ServerSocket(broker.port);
         Socket socket = null;
 
-
         while(true) {
             socket = serverSocket.accept();
             Thread requestHandler=new Thread(new RequestHandler(socket,broker));
             requestHandler.start();
-
-            //Send TopicSelected
-
-            while(Thread.activeCount()>2){
-                Thread.yield();
-            }
-
-            System.out.println(broker.topicPriorityQueues.get(0).size());
         }
     }
 }
@@ -205,6 +185,9 @@ class RequestHandler extends Thread{
     public void run() {
         try {
             while(true){
+                if(socket.isClosed()){
+                    break;
+                }
                 Long receiveTime = System.nanoTime();
                 InputStream is = socket.getInputStream();
                 ObjectInputStream ois=new ObjectInputStream(is);
@@ -217,25 +200,80 @@ class RequestHandler extends Thread{
                         System.out.println(timePub1.toString());
                         new Thread(new SendMessageHandler(socket, timePub1)).start();
                     }else if(timePub.count == 3){
-                        System.out.println("..........");
                         System.out.println("TimeDifference: " + timePub.getTopic() +" "+ timePub.getTimestamp()/2);
                         broker.mapTimeDifference.put(timePub.getTopic(), timePub.getTimestamp()/2);
                     }
                 }else if(obj instanceof  Message){
-                    System.out.println("............");
                     Message msg = (Message) obj;
-                    broker.addMessageToQueue(msg.getTopic(),msg);
-                    System.out.println("receive message from publisher：" + msg.toString());
+                    if(msg.getTopic().equals("online")){
+                        //modify subscribersInfo Table
+                        String[] info = msg.getPayload().split(" ");
+                        String name = info[0];
+                        String ip = info[1];
+                        String port = info[2];
+
+                        if(broker.subscribers.containsKey(name)){
+                            BufferedReader brOfSubscriberInfo = new BufferedReader(new FileReader("subscriberInfo.txt"));
+                            ArrayList<String> list = new ArrayList<>();
+
+                            String line = null;
+                            while((line = brOfSubscriberInfo.readLine())!=null){
+                                String[] strs = line.split(" ");
+                                if(strs[0].equals(name)){
+                                    line = name+" "+ip+" "+port+"\n";
+                                }
+                                list.add(line);
+                            }
+
+                            BufferedWriter outputOfSubscriberInfo = new BufferedWriter(new FileWriter("subscriberInfo.txt"));
+                            for(String s:list){
+                                outputOfSubscriberInfo.write(s+"\n");
+                            }
+
+                            outputOfSubscriberInfo.close();
+                            brOfSubscriberInfo.close();
+                        }
+                        else{
+                            BufferedWriter outputOfSubscriberInfo = new BufferedWriter(new FileWriter("subscriberInfo.txt",true));
+                            outputOfSubscriberInfo.write(name+" "+ip+" "+port+"\n");
+                            outputOfSubscriberInfo.close();
+                        }
+                        broker.subscribers.put(name, ip+":"+port);
+                        broker.onlineSubscribers.put(name,socket);
+                        System.out.println(name+" "+"online");
+                    }
+                    else if(msg.getTopic().equals("offline")){
+                        String name = msg.getPayload();
+                        broker.onlineSubscribers.remove(name);
+                        socket.close();
+                        System.out.println(name+" "+"offline");
+                    }
+                    else{
+                        String publisherName = msg.getTopic().substring(0,msg.getTopic().indexOf(":"));
+                        String topic = msg.getTopic().substring(msg.getTopic().indexOf(":")+1);
+                        msg.setTopic(topic);
+                        msg.setTimestamp(msg.getTimestamp()-broker.mapTimeDifference.get(publisherName));
+                        broker.addMessageToQueue(topic,msg);
+                        System.out.println("receive message from publisher：" + msg.toString());
+
+                        //broker.broadcast(topic);
+                    }
                 }else if(obj instanceof  TopicSub){
                     TopicSub topicSub = (TopicSub) obj;
-                    System.out.println(topicSub);
-                    for(String topic : topicSub.topicSelected){
-                        if(!broker.subscribersTopicMap.containsKey(topic)){
-                            broker.subscribersTopicMap.put(topic, new HashSet<>());
+                    if(topicSub.isSubscribe){
+                        for(String topic : topicSub.topicSelected){
+                            broker.addSubscriber(topic,topicSub.subscriberName);
                         }
-                        broker.subscribersTopicMap.get(topic).add(topicSub.subscriberName);
+                        System.out.println("收到来自" + topicSub.subscriberName + "的连接选择的topic是" + topicSub.topicSelected);
                     }
-                    System.out.println("收到来自" + topicSub.subscriberName + "的连接选择的topic是" + topicSub.topicSelected);
+                    else{
+                        for(String topic : topicSub.topicSelected){
+                            broker.removeSubscriber(topic,topicSub.subscriberName);
+                        }
+                    }
+                    if(!broker.onlineSubscribers.containsKey(topicSub.subscriberName)){
+                        socket.close();
+                    }
                 }
             }
         } catch (IOException | ClassNotFoundException e) {
@@ -243,6 +281,7 @@ class RequestHandler extends Thread{
         }
     }
 }
+
 
 class SendMessageHandler<T> extends Thread{
     Socket socket;
@@ -264,5 +303,3 @@ class SendMessageHandler<T> extends Thread{
         }
     }
 }
-
-

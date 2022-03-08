@@ -4,11 +4,29 @@ import java.io.Serializable;
 import java.util.List;
 
 public class TopicSub implements Serializable {
+    boolean isSubscribe;
     String subscriberName;
     List<String> topicSelected;
 
-    public TopicSub(String subscriberName, List<String> topicSelected) {
+    public TopicSub(boolean isSubscribe, String subscriberName, List<String> topicSelected) {
+        this.isSubscribe = isSubscribe;
+        this.subscriberName = subscriberName;
         this.topicSelected = topicSelected;
+    }
+
+    public boolean isSubscribe() {
+        return isSubscribe;
+    }
+
+    public void setSubscribe(boolean subscribe) {
+        isSubscribe = subscribe;
+    }
+
+    public String getSubscriberName() {
+        return subscriberName;
+    }
+
+    public void setSubscriberName(String subscriberName) {
         this.subscriberName = subscriberName;
     }
 
@@ -20,19 +38,12 @@ public class TopicSub implements Serializable {
         this.topicSelected = topicSelected;
     }
 
-    public String getSubscriberName() {
-        return subscriberName;
-    }
-
-    public void setSubscriberName(String subscriberName) {
-        this.subscriberName = subscriberName;
-    }
-
     @Override
     public String toString() {
         return "TopicSub{" +
-                "subscriberName='" + subscriberName + '\'' +
-                ", topicSelected='" + topicSelected + '\'' +
+                "isSubscribe=" + isSubscribe +
+                ", subscriberName='" + subscriberName + '\'' +
+                ", topicSelected=" + topicSelected +
                 '}';
     }
 }

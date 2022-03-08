@@ -8,23 +8,12 @@ import java.net.UnknownHostException;
 import java.util.*;
 
 public class Subscriber implements Serializable {
-    private HashMap<String, String> subscriberTopicName;
     private String subscriberName;
     private int port;
 
-
-
-    public Subscriber(String subscriberName, int port, HashMap<String, String> subscriberTopicName) {
+    public Subscriber(String subscriberName, int port) {
         this.subscriberName = subscriberName;
         this.port = port;
-        this.subscriberTopicName = subscriberTopicName;
-    }
-
-    public void addSubscribeTopic(String topic, Subscriber subscriber){
-
-    }
-
-    public void unSubscribeTopic(String topic, Subscriber subscriber){
     }
 
     public static void main(String[] args) throws UnknownHostException, IOException {
@@ -32,67 +21,78 @@ public class Subscriber implements Serializable {
         Scanner scanner = new Scanner(System.in);
         String name = scanner.nextLine();
         int port = scanner.nextInt();
-        List<String> topicSelected = new ArrayList<>();
 
+        Map<String, String> brokers = new HashMap<String,String>();
+        Map<String, Socket> onlineMap = new HashMap<>();
 
         String ip = InetAddress.getLocalHost().getHostAddress();
         System.out.println(ip);
 
-        // access to serverinfo.txt to the server information.
-        Socket socket = null;
-        File serverinfo = new File("C://Users//18801//Desktop//serverinfo.txt");
-        FileReader fileReader = new FileReader(serverinfo);
+        // access to brokerInfo.txt to the server information.
+        File brokerInfo = new File("brokerInfo.txt");
+        if (!brokerInfo.exists()) {
+            brokerInfo.createNewFile();
+        }
+        FileReader fileReader = new FileReader(brokerInfo);
         BufferedReader bufferedReader = new BufferedReader(fileReader);
         String line = null;
-        String serverIP = "";
-        int serverPort = 0;
         while ((line = bufferedReader.readLine()) != null) {
-            boolean isconnected = false;
             String[] serverfields = line.split(" ");
-            serverIP = serverfields[0];
-            serverPort = Integer.valueOf(serverfields[1]);
-            if(isconnected){
-                break;
-            }
+            brokers.put(serverfields[0],serverfields[1]+":"+serverfields[2]);
         }
+
         try{
-            socket = new Socket(serverIP, serverPort);
-            System.out.println("输入" + name + "想要关注的topic: ");
-            Scanner sc = new Scanner(System.in);
-            String[] topicList = sc.nextLine().split(" ");
-            for(String topic : topicList){
-                topicSelected.add(topic);
+            while(true){
+                Scanner sc = new Scanner(System.in);
+                String[] strs =  sc.nextLine().split(" ");
+                String command = strs[0];
+
+                String[] brokerAddress = brokers.getOrDefault(strs[1], "").split(":");
+                if(brokerAddress.length==0){
+                    System.out.println("No such broker!");
+                    continue;
+                }
+
+                Socket socket = null;
+                if(onlineMap.containsKey(strs[1])){
+                    socket = onlineMap.get(strs[1]);
+                }
+                else{
+                    socket = new Socket(brokerAddress[0], Integer.parseInt(brokerAddress[1]));
+                }
+
+                if(command.equals("online")){
+                    new Thread(new SendMessageHandler(socket, new Message("online",name+" "+ip+" "+port))).start();
+                    new Thread(new MessageReceiver(socket)).start();
+                    onlineMap.put(strs[1],socket);
+                }
+                else if(command.equals("offline")){
+                    new Thread(new SendMessageHandler(socket, new Message("offline",name))).start();
+                    onlineMap.remove(strs[1]);
+                }
+                else if(command.equals("subscribe")){
+                    List<String> topicSelected = new ArrayList<>();
+                    for(int i = 2;i<strs.length;i++){
+                        topicSelected.add(strs[i]);
+                    }
+                    new Thread(new SendMessageHandler(socket, new TopicSub(true, name, topicSelected))).start();
+                }
+                else if(command.equals("unsubscribe")){
+                    List<String> topicSelected = new ArrayList<>();
+                    for(int i = 2;i<strs.length;i++){
+                        topicSelected.add(strs[i]);
+                    }
+                    new Thread(new SendMessageHandler(socket, new TopicSub(false, name, topicSelected))).start();
+                }
+                else{
+                    System.out.println("Error Command!");
+                }
             }
-            new Thread(new SendTopic<>(socket, new TopicSub(name, topicSelected))).start();
-            new Thread(new MessageReceiver(socket)).start();
         }catch(Exception e){
             e.printStackTrace();
         }
     }
 }
-
-class SendTopic<T> extends Thread{
-    Socket socket;
-    TopicSub topicSub;
-
-    public SendTopic(Socket s, TopicSub topicSub){
-        this.socket = s;
-        this.topicSub = topicSub;
-    }
-
-    @Override
-    public void run() {
-        try {
-            OutputStream os = new DataOutputStream(socket.getOutputStream());
-            ObjectOutputStream oos = new ObjectOutputStream(os);
-            oos.writeObject(topicSub);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-}
-
-
 
 class MessageReceiver extends Thread{
     private Socket socket;
@@ -104,14 +104,17 @@ class MessageReceiver extends Thread{
     @Override
     public void run() {
         try {
-            InputStream is = socket.getInputStream();
-            ObjectInputStream ois=new ObjectInputStream(is);
-            Object obj = (Object)ois.readObject();
-            if(obj instanceof  Message){
-                System.out.println("收到的消息：" + (Message) ois.readObject());
-            }else if(obj instanceof  TopicSub){
-                TopicSub topicSub = (TopicSub)obj;
-                System.out.println(topicSub.subscriberName + "可以接受的topic是" + topicSub.topicSelected);
+            while(true){
+                if(socket.isClosed()){
+                    break;
+                }
+                InputStream is = socket.getInputStream();
+                ObjectInputStream ois=new ObjectInputStream(is);
+                Object obj = (Object)ois.readObject();
+                if(obj instanceof  Message){
+                    Message msg = (Message) obj;
+                    System.out.println("收到的消息：" + msg.toString());
+                }
             }
         } catch (IOException | ClassNotFoundException e) {
             e.printStackTrace();
