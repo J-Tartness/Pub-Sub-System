@@ -3,10 +3,17 @@ package main;
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 public class Broker {
     String brokerName;
     int port;
+
+    // Mutex for controlling priorityQueue poll
+    private static Semaphore mutexAdd = new Semaphore(1);
+
+    private static Semaphore mutexRemove = new Semaphore(1);
 
     //TimeDifference
     Map<String , Long> mapTimeDifference = new HashMap<>();
@@ -126,22 +133,37 @@ public class Broker {
         outputOftopicAndSub.close();
     }
 
-    public void addMessageToQueue(String topic, Message message){
+    public void addMessageToQueue(String topic, Message message) throws InterruptedException {
         if(!indexOfTopicPriorityQueue.containsKey(message.getTopic())){
             return;
         }
         int index = indexOfTopicPriorityQueue.get(topic);
-        topicPriorityQueues.get(index).add(message);
+        if(mutexAdd.tryAcquire(2000, TimeUnit.MILLISECONDS)) {
+            topicPriorityQueues.get(index).add(message);
+            mutexAdd.release();
+        }
     }
 
-    public void broadcast(String topic) throws IOException {
+    public Message removeMessageToQueue(String topic, Message message) throws InterruptedException {
+        if(!indexOfTopicPriorityQueue.containsKey(topic)){
+            return null;
+        }
+        int index = indexOfTopicPriorityQueue.get(topic);
+        if(mutexRemove.tryAcquire(2000, TimeUnit.MILLISECONDS)) {
+            message = topicPriorityQueues.get(indexOfTopicPriorityQueue.get(topic)).poll();
+            mutexRemove.release();
+        }
+        return message;
+    }
+
+    public void broadcast(String topic) throws IOException, InterruptedException {
         if(topicPriorityQueues.get(indexOfTopicPriorityQueue.get(topic)).isEmpty()){
             return;
         }
 
         Set<String> set = subscribersTopicMap.get(topic);
-        Message message = topicPriorityQueues.get(indexOfTopicPriorityQueue.get(topic)).poll();
-
+        Message message = null;
+        message =  removeMessageToQueue(topic, message);
         for(String subscriberName:set){
 //            String[] strs = subscribers.get(subscriberName).split(" ");
 //            String ip = strs[0];
@@ -175,6 +197,8 @@ public class Broker {
 class RequestHandler extends Thread{
     Socket socket;
     Broker broker;
+
+    private static Semaphore mutexQueue = new Semaphore(1);
 
     public RequestHandler(Socket s, Broker b){
         this.socket = s;
@@ -232,8 +256,7 @@ class RequestHandler extends Thread{
 
                             outputOfSubscriberInfo.close();
                             brOfSubscriberInfo.close();
-                        }
-                        else{
+                        }else{
                             BufferedWriter outputOfSubscriberInfo = new BufferedWriter(new FileWriter("subscriberInfo.txt",true));
                             outputOfSubscriberInfo.write(name+" "+ip+" "+port+"\n");
                             outputOfSubscriberInfo.close();
@@ -247,16 +270,14 @@ class RequestHandler extends Thread{
                         broker.onlineSubscribers.remove(name);
                         socket.close();
                         System.out.println(name+" "+"offline");
-                    }
-                    else{
+                    }else{
                         String publisherName = msg.getTopic().substring(0,msg.getTopic().indexOf(":"));
                         String topic = msg.getTopic().substring(msg.getTopic().indexOf(":")+1);
                         msg.setTopic(topic);
                         msg.setTimestamp(msg.getTimestamp()-broker.mapTimeDifference.get(publisherName));
                         broker.addMessageToQueue(topic,msg);
                         System.out.println("receive message from publisher：" + msg.toString());
-
-                        //broker.broadcast(topic);
+                        broker.broadcast(topic);
                     }
                 }else if(obj instanceof  TopicSub){
                     TopicSub topicSub = (TopicSub) obj;
@@ -276,7 +297,7 @@ class RequestHandler extends Thread{
                     }
                 }
             }
-        } catch (IOException | ClassNotFoundException e) {
+        } catch (IOException | ClassNotFoundException | InterruptedException e) {
             e.printStackTrace();
         }
     }
