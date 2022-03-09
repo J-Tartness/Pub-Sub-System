@@ -19,10 +19,8 @@ public class Publisher {
 //            System.err.println("Usage: java PublisherHandler <publisher_name>");
 //            System.exit(-1);
 //        }
-
         Publisher publisher = new Publisher("Jake");
-
-        Scanner scanner = new Scanner(System.in);
+        System.out.println("Publisher "+publisher.publisherName+" is online...\n");
 
         Map<String, Socket> brokers = new HashMap<String,Socket>();
         Map<String, String> brokersAddress = new HashMap<String, String>();
@@ -41,7 +39,7 @@ public class Publisher {
             Socket socket = new Socket(serverfields[1], Integer.parseInt(serverfields[2]));
 
             TimePub timePub = new TimePub(publisher.publisherName, 1, System.nanoTime());
-            System.out.println(timePub.toString());
+            //System.out.println(timePub.toString());
             new Thread(new SendMessageHandler<>(socket, timePub)).start();
             new Thread(new receiveTime(socket)).start();
 
@@ -95,11 +93,11 @@ class receiveTime implements Runnable {
             TimePub timePub = (TimePub) obj;
             if (timePub.count == 2) {
                 TimePub timePub1 = new TimePub(timePub.topic, 3, timePub.timestamp - System.nanoTime());
-                System.out.println(timePub1.toString());
+                //System.out.println(timePub1.toString());
                 new Thread(new SendMessageHandler(socket, timePub1)).start();
             }
         } catch (IOException | ClassNotFoundException e) {
-            e.printStackTrace();
+            //e.printStackTrace();
         }
     }
 }

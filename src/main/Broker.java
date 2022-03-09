@@ -59,6 +59,9 @@ public class Broker {
         }
 
         while((line = brOfSubscriberInfo.readLine())!=null){
+            if(line.equals("")){
+                continue;
+            }
             String[] strs = line.split(" ");
             String subscriberName = strs[0];
 
@@ -164,6 +167,7 @@ public class Broker {
         Set<String> set = subscribersTopicMap.get(topic);
         Message message = null;
         message =  removeMessageToQueue(topic, message);
+        System.out.println(message.toString());
         for(String subscriberName:set){
 //            String[] strs = subscribers.get(subscriberName).split(" ");
 //            String ip = strs[0];
@@ -173,18 +177,21 @@ public class Broker {
             if(s==null){
                 continue;
             }
-            System.out.println("Send Message to:"+subscriberName);
-            System.out.println(message.toString());
+            System.out.println("Send this message to:"+subscriberName);
             Thread sendMessageHandler = new Thread(new SendMessageHandler(s,message));
             sendMessageHandler.start();
         }
     }
 
     public static void main(String[] arg) throws IOException {
-        Broker broker = new Broker("broker");
+        Broker broker = new Broker("SBS");
+        System.out.println("Broker "+broker.brokerName+" is online...\n");
 
         ServerSocket serverSocket = new ServerSocket(broker.port);
         Socket socket = null;
+
+        Thread broadcastHandler = new Thread(new BroadcastHandler(broker));
+        broadcastHandler.start();
 
         while(true) {
             socket = serverSocket.accept();
@@ -194,11 +201,59 @@ public class Broker {
     }
 }
 
+class BroadcastHandler extends Thread{
+    Broker broker;
+
+    public BroadcastHandler(Broker b){
+        this.broker = b;
+    }
+
+    @Override
+    public void run() {
+        while(true){
+            Scanner sc = new Scanner(System.in);
+            String[] strs = sc.nextLine().split(" ");
+            String command = strs[0];
+            if(command.equals("broadcast")){
+                String topic = strs[1];
+                if(!broker.subscribersTopicMap.containsKey(topic)){
+                    System.out.println("No such topic!");
+                    continue;
+                }
+                try {
+                    broker.broadcast(topic);
+                } catch (IOException | InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            else if(command.equals("lsSub")){
+                String topic = strs[1];
+                Set<String> set= broker.subscribersTopicMap.get(topic);
+                for(String name:set){
+                    System.out.print(name+" ");
+                }
+                System.out.println();
+            }
+            else if(command.equals("lsOnline")){
+                for(String name: broker.onlineSubscribers.keySet()){
+                    System.out.print(name+" ");
+                }
+                System.out.println();
+            }
+            else{
+                System.out.println("Error Command!");
+            }
+        }
+    }
+}
+
+
 class RequestHandler extends Thread{
     Socket socket;
     Broker broker;
-
-    private static Semaphore mutexQueue = new Semaphore(1);
+    boolean isRequiredToListen = false;
+    String subName = null;
+    boolean flag = true;
 
     public RequestHandler(Socket s, Broker b){
         this.socket = s;
@@ -208,101 +263,124 @@ class RequestHandler extends Thread{
     @Override
     public void run() {
         try {
-            while(true){
+            long lastHeartReceiveTime = System.currentTimeMillis();
+
+            while(flag){
+                if(isRequiredToListen && (System.currentTimeMillis()-lastHeartReceiveTime>3000)){
+                    System.out.println("No Heart from "+subName+"! Socket Close!");
+                    break;
+                }
+
                 if(socket.isClosed()){
                     break;
                 }
-                Long receiveTime = System.nanoTime();
+
                 InputStream is = socket.getInputStream();
-                ObjectInputStream ois=new ObjectInputStream(is);
-                Object obj = (Object)ois.readObject();
-                if(obj instanceof  TimePub){
-                    TimePub timePub = (TimePub) obj;
-                    if(timePub.count == 1){
-                        System.out.println("收到第一条消息");
-                        TimePub timePub1 = new TimePub(timePub.topic, 2, System.nanoTime() + receiveTime -timePub.timestamp);
-                        System.out.println(timePub1.toString());
-                        new Thread(new SendMessageHandler(socket, timePub1)).start();
-                    }else if(timePub.count == 3){
-                        System.out.println("TimeDifference: " + timePub.getTopic() +" "+ timePub.getTimestamp()/2);
-                        broker.mapTimeDifference.put(timePub.getTopic(), timePub.getTimestamp()/2);
-                    }
-                }else if(obj instanceof  Message){
-                    Message msg = (Message) obj;
-                    if(msg.getTopic().equals("online")){
-                        //modify subscribersInfo Table
-                        String[] info = msg.getPayload().split(" ");
-                        String name = info[0];
-                        String ip = info[1];
-                        String port = info[2];
+                if(is.available()>0){
+                    ObjectInputStream ois=new ObjectInputStream(is);
+                    Object obj = (Object)ois.readObject();
+                    Long receiveTime = System.nanoTime();
+                    if(obj instanceof  TimePub){
+                        TimePub timePub = (TimePub) obj;
+                        if(timePub.count == 1){
+                            //System.out.println("收到第一条消息");
+                            TimePub timePub1 = new TimePub(timePub.topic, 2, System.nanoTime() + receiveTime -timePub.timestamp);
+                            //System.out.println(timePub1.toString());
+                            new Thread(new SendMessageHandler(socket, timePub1)).start();
+                        }else if(timePub.count == 3){
+                            System.out.println("TimeDifference between " + timePub.getTopic() +" is:"+ timePub.getTimestamp()/2);
+                            broker.mapTimeDifference.put(timePub.getTopic(), timePub.getTimestamp()/2);
+                        }
+                    }else if(obj instanceof  Message){
+                        Message msg = (Message) obj;
+                        if(msg.getTopic().equals("online")){
+                            //modify subscribersInfo Table
+                            String[] info = msg.getPayload().split(" ");
+                            String name = info[0];
+                            String ip = info[1];
+                            String port = info[2];
 
-                        if(broker.subscribers.containsKey(name)){
-                            BufferedReader brOfSubscriberInfo = new BufferedReader(new FileReader("subscriberInfo.txt"));
-                            ArrayList<String> list = new ArrayList<>();
+                            if(broker.subscribers.containsKey(name)){
+                                BufferedReader brOfSubscriberInfo = new BufferedReader(new FileReader("subscriberInfo.txt"));
+                                ArrayList<String> list = new ArrayList<>();
 
-                            String line = null;
-                            while((line = brOfSubscriberInfo.readLine())!=null){
-                                String[] strs = line.split(" ");
-                                if(strs[0].equals(name)){
-                                    line = name+" "+ip+" "+port+"\n";
+                                String line = null;
+                                while((line = brOfSubscriberInfo.readLine())!=null){
+                                    String[] strs = line.split(" ");
+                                    if(strs[0].equals(name)){
+                                        line = name+" "+ip+" "+port+"\n";
+                                    }
+                                    list.add(line);
                                 }
-                                list.add(line);
-                            }
 
-                            BufferedWriter outputOfSubscriberInfo = new BufferedWriter(new FileWriter("subscriberInfo.txt"));
-                            for(String s:list){
-                                outputOfSubscriberInfo.write(s+"\n");
-                            }
+                                BufferedWriter outputOfSubscriberInfo = new BufferedWriter(new FileWriter("subscriberInfo.txt"));
+                                for(String s:list){
+                                    outputOfSubscriberInfo.write(s+"\n");
+                                }
 
-                            outputOfSubscriberInfo.close();
-                            brOfSubscriberInfo.close();
+                                outputOfSubscriberInfo.close();
+                                brOfSubscriberInfo.close();
+                            }else{
+                                BufferedWriter outputOfSubscriberInfo = new BufferedWriter(new FileWriter("subscriberInfo.txt",true));
+                                outputOfSubscriberInfo.write(name+" "+ip+" "+port+"\n");
+                                outputOfSubscriberInfo.close();
+                            }
+                            broker.subscribers.put(name, ip+":"+port);
+                            broker.onlineSubscribers.put(name,socket);
+                            System.out.println(name+" is"+" "+"online. Start Listening Heart!");
+                            this.subName = name;
+                            isRequiredToListen = true;
+                        }
+                        else if(msg.getTopic().equals("offline")){
+                            String name = msg.getPayload();
+                            broker.onlineSubscribers.remove(name);
+                            socket.close();
+                            System.out.println(name+" is"+" "+"offline");
                         }else{
-                            BufferedWriter outputOfSubscriberInfo = new BufferedWriter(new FileWriter("subscriberInfo.txt",true));
-                            outputOfSubscriberInfo.write(name+" "+ip+" "+port+"\n");
-                            outputOfSubscriberInfo.close();
+                            String publisherName = msg.getTopic().substring(0,msg.getTopic().indexOf(":"));
+                            String topic = msg.getTopic().substring(msg.getTopic().indexOf(":")+1);
+                            msg.setTopic(topic);
+                            msg.setTimestamp(msg.getTimestamp()-broker.mapTimeDifference.get(publisherName));
+                            broker.addMessageToQueue(topic,msg);
+                            System.out.println("Received message from "+publisherName+":"+ msg.getPayload());
+                            //broker.broadcast(topic);
                         }
-                        broker.subscribers.put(name, ip+":"+port);
-                        broker.onlineSubscribers.put(name,socket);
-                        System.out.println(name+" "+"online");
-                    }
-                    else if(msg.getTopic().equals("offline")){
-                        String name = msg.getPayload();
-                        broker.onlineSubscribers.remove(name);
-                        socket.close();
-                        System.out.println(name+" "+"offline");
-                    }else{
-                        String publisherName = msg.getTopic().substring(0,msg.getTopic().indexOf(":"));
-                        String topic = msg.getTopic().substring(msg.getTopic().indexOf(":")+1);
-                        msg.setTopic(topic);
-                        msg.setTimestamp(msg.getTimestamp()-broker.mapTimeDifference.get(publisherName));
-                        broker.addMessageToQueue(topic,msg);
-                        System.out.println("receive message from publisher：" + msg.toString());
-                        broker.broadcast(topic);
-                    }
-                }else if(obj instanceof  TopicSub){
-                    TopicSub topicSub = (TopicSub) obj;
-                    if(topicSub.isSubscribe){
-                        for(String topic : topicSub.topicSelected){
-                            broker.addSubscriber(topic,topicSub.subscriberName);
+                    }else if(obj instanceof  TopicSub){
+                        TopicSub topicSub = (TopicSub) obj;
+                        if(topicSub.isSubscribe){
+                            for(String topic : topicSub.topicSelected){
+                                broker.addSubscriber(topic,topicSub.subscriberName);
+                            }
+                            System.out.println("Received subscription from " + topicSub.subscriberName + ": " + topicSub.topicSelected);
                         }
-                        System.out.println("收到来自" + topicSub.subscriberName + "的连接选择的topic是" + topicSub.topicSelected);
-                    }
-                    else{
-                        for(String topic : topicSub.topicSelected){
-                            broker.removeSubscriber(topic,topicSub.subscriberName);
+                        else{
+                            for(String topic : topicSub.topicSelected){
+                                broker.removeSubscriber(topic,topicSub.subscriberName);
+                            }
+                        }
+                        if(!broker.onlineSubscribers.containsKey(topicSub.subscriberName)){
+                            socket.close();
                         }
                     }
-                    if(!broker.onlineSubscribers.containsKey(topicSub.subscriberName)){
-                        socket.close();
+                    else if(obj instanceof  Heart){
+                        lastHeartReceiveTime = System.currentTimeMillis();
+                        new Thread( new SendMessageHandler(socket,new Heart("Alive"))).start();
                     }
                 }
             }
-        } catch (IOException | ClassNotFoundException | InterruptedException e) {
+            if(subName!=null){
+                broker.onlineSubscribers.remove(subName);
+            }
+            if(!socket.isClosed()){
+                socket.close();
+            }
+            System.out.println("Socket close!");
+        } catch (Exception e) {
             e.printStackTrace();
+            flag = false;
         }
     }
 }
-
 
 class SendMessageHandler<T> extends Thread{
     Socket socket;
@@ -319,8 +397,8 @@ class SendMessageHandler<T> extends Thread{
             OutputStream os = new DataOutputStream(socket.getOutputStream());
             ObjectOutputStream oos = new ObjectOutputStream(os);
             oos.writeObject(msg);
-        } catch (IOException e) {
-            e.printStackTrace();
+        } catch (Exception e) {
+            //e.printStackTrace();
         }
     }
 }

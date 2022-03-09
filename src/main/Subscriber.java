@@ -26,7 +26,7 @@ public class Subscriber implements Serializable {
         Map<String, Socket> onlineMap = new HashMap<>();
 
         String ip = InetAddress.getLocalHost().getHostAddress();
-        System.out.println(ip);
+        //System.out.println(ip);
 
         // access to brokerInfo.txt to the server information.
         File brokerInfo = new File("brokerInfo.txt");
@@ -47,6 +47,13 @@ public class Subscriber implements Serializable {
                 String[] strs =  sc.nextLine().split(" ");
                 String command = strs[0];
 
+                if(command.equals("quit")){
+                    for(Socket s:onlineMap.values()){
+                        s.close();
+                    }
+                    break;
+                }
+
                 String[] brokerAddress = brokers.getOrDefault(strs[1], "").split(":");
                 if(brokerAddress.length==0){
                     System.out.println("No such broker!");
@@ -56,6 +63,9 @@ public class Subscriber implements Serializable {
                 Socket socket = null;
                 if(onlineMap.containsKey(strs[1])){
                     socket = onlineMap.get(strs[1]);
+                    if(socket.isClosed()){
+                        socket = new Socket(brokerAddress[0], Integer.parseInt(brokerAddress[1]));
+                    }
                 }
                 else{
                     socket = new Socket(brokerAddress[0], Integer.parseInt(brokerAddress[1]));
@@ -63,7 +73,9 @@ public class Subscriber implements Serializable {
 
                 if(command.equals("online")){
                     new Thread(new SendMessageHandler(socket, new Message("online",name+" "+ip+" "+port))).start();
-                    new Thread(new MessageReceiver(socket)).start();
+                    new Thread(new MessageReceiver(socket,strs[1])).start();
+                    System.out.println("Start sending heart to "+strs[1]);
+                    new Thread(new SendHeartHandler(socket)).start();
                     onlineMap.put(strs[1],socket);
                 }
                 else if(command.equals("offline")){
@@ -94,30 +106,77 @@ public class Subscriber implements Serializable {
     }
 }
 
-class MessageReceiver extends Thread{
-    private Socket socket;
+class SendHeartHandler extends Thread{
+    Socket socket;
+    boolean flag = true;
 
-    public MessageReceiver(Socket s){
+    public SendHeartHandler(Socket socket) {
+        this.socket = socket;
+    }
+
+    @Override
+    public void run() {
+        long lastSendTime = System.currentTimeMillis();
+        try{
+            while(flag){
+                if(socket.isClosed()){
+                    break;
+                }
+                if(System.currentTimeMillis() - lastSendTime > 2000){
+                    new Thread( new SendMessageHandler(socket,new Heart("Alive"))).start();
+                    lastSendTime = System.currentTimeMillis();
+                }
+                else{
+                    Thread.sleep(100);
+                }
+            }
+        }catch (Exception e) {
+            flag = false;
+        }
+    }
+}
+
+class MessageReceiver extends Thread{
+    Socket socket;
+    String name;
+    boolean flag = true;
+
+    public MessageReceiver(Socket s, String n){
         this.socket = s;
+        this.name = n;
     }
 
     @Override
     public void run() {
         try {
-            while(true){
+            long lastHeartReceiveTime = System.currentTimeMillis();
+            while(flag){
                 if(socket.isClosed()){
                     break;
                 }
+                if(System.currentTimeMillis()-lastHeartReceiveTime>3000){
+                    break;
+                }
+
                 InputStream is = socket.getInputStream();
-                ObjectInputStream ois=new ObjectInputStream(is);
-                Object obj = (Object)ois.readObject();
-                if(obj instanceof  Message){
-                    Message msg = (Message) obj;
-                    System.out.println("收到的消息：" + msg.toString());
+                if(is.available()>0){
+                    ObjectInputStream ois=new ObjectInputStream(is);
+                    Object obj = (Object)ois.readObject();
+                    if(obj instanceof  Message){
+                        Message msg = (Message) obj;
+                        System.out.println("Received "+msg.getTopic()+" message: "+msg.getPayload());
+                    }
+                    else if(obj instanceof  Heart){
+                        lastHeartReceiveTime = System.currentTimeMillis();
+                    }
                 }
             }
-        } catch (IOException | ClassNotFoundException e) {
-            e.printStackTrace();
+            if(!socket.isClosed()){
+                socket.close();
+                System.out.println("No Heart from "+name+"! Socket Close!");
+            }
+        } catch (Exception e) {
+            flag = false;
         }
     }
 }
