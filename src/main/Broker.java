@@ -184,10 +184,15 @@ public class Broker {
     }
 
     public static void main(String[] arg) throws IOException {
-        Broker broker = new Broker("SBS");
+        System.out.println("please name the broker and give port!");
+        Scanner scanner = new Scanner(System.in);
+        String name = scanner.nextLine();
+        int port = scanner.nextInt();
+
+        Broker broker = new Broker(name);
         System.out.println("Broker "+broker.brokerName+" is online...\n");
 
-        ServerSocket serverSocket = new ServerSocket(broker.port);
+        ServerSocket serverSocket = new ServerSocket(port);
         Socket socket = null;
 
         Thread broadcastHandler = new Thread(new BroadcastHandler(broker));
@@ -227,6 +232,7 @@ class BroadcastHandler extends Thread{
                 }
             }
             else if(command.equals("lsSub")){
+                //lsSub Topic
                 String topic = strs[1];
                 Set<String> set= broker.subscribersTopicMap.get(topic);
                 for(String name:set){
@@ -235,6 +241,7 @@ class BroadcastHandler extends Thread{
                 System.out.println();
             }
             else if(command.equals("lsOnline")){
+                //lsOnline
                 for(String name: broker.onlineSubscribers.keySet()){
                     System.out.print(name+" ");
                 }
@@ -283,7 +290,6 @@ class RequestHandler extends Thread{
                     if(obj instanceof  TimePub){
                         TimePub timePub = (TimePub) obj;
                         if(timePub.count == 1){
-                            //System.out.println("收到第一条消息");
                             TimePub timePub1 = new TimePub(timePub.topic, 2, System.nanoTime() + receiveTime -timePub.timestamp);
                             //System.out.println(timePub1.toString());
                             new Thread(new SendMessageHandler(socket, timePub1)).start();
@@ -357,6 +363,7 @@ class RequestHandler extends Thread{
                             for(String topic : topicSub.topicSelected){
                                 broker.removeSubscriber(topic,topicSub.subscriberName);
                             }
+                            System.out.println("Received unsubscription from " + topicSub.subscriberName + ": " + topicSub.topicSelected);
                         }
                         if(!broker.onlineSubscribers.containsKey(topicSub.subscriberName)){
                             socket.close();
